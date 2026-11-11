@@ -129,4 +129,9 @@ My answers are in [QuestionsToAnswerInYourReport.md](QuestionsToAnswerInYourRepo
 
 ## Clean up
 
-When I finish, I will disable or delete the `dynamodb-backup-every-2min` schedule so it stops running and creating new files. I can then delete the Lambda functions, the DynamoDB table, the S3 bucket and the IAM roles if I no longer need them.
+After capturing the scheduled-backup evidence, I disabled the `dynamodb-backup-every-2min` schedule on November 11, 2026. It is disabled, not deleted, so it can be re-enabled if needed. The screenshots show its status before and after cleanup:
+
+- [Schedule enabled before cleanup](Scheduled-Backup-README-Screenshots/eventbridge-schedule-enabled-before-cleanup.png)
+- [Schedule disabled after cleanup](Scheduled-Backup-README-Screenshots/eventbridge-schedule-disabled-after-cleanup.png)
+
+The Lambda functions, DynamoDB table, S3 bucket, and IAM roles were not deleted. Delete those resources only if they are no longer needed.

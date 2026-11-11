@@ -1,28 +1,28 @@
 # Scheduled DynamoDB JSON Export to Amazon S3
 
-This project uses two AWS Lambda functions to import sample users into DynamoDB and export them as JSON files to an S3 bucket. EventBridge Scheduler can run the export function automatically, and CloudWatch stores the function logs.
+In this assignment I built a small serverless backup system on AWS. One Lambda function loads sample users into DynamoDB. A second Lambda function reads the table and saves it as a JSON file in S3. EventBridge Scheduler runs the second function every 2 minutes, and CloudWatch keeps the logs.
 
-> **AWS Region:** US East (N. Virginia) - `us-east-1`. Create the DynamoDB table, Lambda functions, and EventBridge schedule in this same Region. S3 bucket names are global and must be unique.
+> **Region I used:** Asia Pacific (Singapore) - `ap-southeast-1`. I created the DynamoDB table, both Lambda functions, the S3 bucket and the schedule in this Region.
 
 ## How it works
 
 ![AWS Lambda, DynamoDB, EventBridge Scheduler, and S3 architecture](<ScreenShots/Screenshot # Architecture.png>)
 
-1. `import-jsonplaceholder-users` gets sample users from JSONPlaceholder and saves them in the `jsonplaceholder-users` DynamoDB table.
-2. `dynamodb-backup-every-2min` is an EventBridge Scheduler schedule that invokes `export-dynamodb-to-s3`.
-3. `export-dynamodb-to-s3` reads the table and saves a timestamped JSON file to the S3 `backups/` folder.
-4. Both functions send logs to CloudWatch.
+1. `import-jsonplaceholder-users` downloads 10 sample users from JSONPlaceholder and saves them in the `jsonplaceholder-users` DynamoDB table.
+2. `dynamodb-backup-every-2min` is an EventBridge Scheduler schedule that invokes `export-dynamodb-to-s3` every 2 minutes.
+3. `export-dynamodb-to-s3` scans the table and saves a timestamped JSON file in my bucket under `backups/YYYY-MM-DD/`.
+4. Both functions write their logs to CloudWatch.
 
-## Develop and run the project
+## How I completed the assignment
 
-### 1. Edit and package the Lambda code
+### Step 1: Prepared the Lambda code
 
-The function source files are:
+I wrote the two functions in Python:
 
-- Import users: `lambda_src/import_users/lambda_function.py`
-- Export users to S3: `lambda_src/backup_users/lambda_function.py`
+- Import users: [lambda_src/import_users/lambda_function.py](lambda_src/import_users/lambda_function.py)
+- Export users to S3: [lambda_src/backup_users/lambda_function.py](lambda_src/backup_users/lambda_function.py)
 
-Edit the relevant Python file to change a function. From the repository folder, package each function before uploading it. The ZIP must contain `lambda_function.py` at its root.
+Then I packaged each one as a ZIP, with `lambda_function.py` at the root of the ZIP:
 
 ```powershell
 Compress-Archive -Path .\lambda_src\import_users\lambda_function.py `
@@ -32,93 +32,101 @@ Compress-Archive -Path .\lambda_src\backup_users\lambda_function.py `
   -DestinationPath .\lambda_zips\lambda-backup-to-s3.zip -Force
 ```
 
-### 2. Create the DynamoDB table and S3 bucket
+### Step 2: Created the DynamoDB table
 
-In the AWS Console, switch to **US East (N. Virginia) (`us-east-1`)**:
+I created the table `jsonplaceholder-users` with partition key `id` (Number) and on-demand capacity. It was empty at first.
 
-1. Create a DynamoDB table named `jsonplaceholder-users`. Set its partition key to `id` with type **Number**, and select on-demand capacity.
-2. Create a private S3 bucket with a globally unique name. Use your bucket name in place of `YOUR_BUCKET` below.
+![DynamoDB table jsonplaceholder-users with id (Number) partition key](<s3 srn-shot/s3 srn-shot/dynamic-table.png>)
 
-![DynamoDB table with numeric id partition key](<ScreenShots/Screenshot # 1.png>)
+### Step 3: Created the S3 bucket
 
-### 3. Create permissions for the Lambda functions
+I created a private bucket named `student-lambda-backups-saifur` in `ap-southeast-1`.
 
-Create a separate Lambda execution role for each function. Add the AWS-managed `AWSLambdaBasicExecutionRole` policy to both roles for CloudWatch logging.
+![S3 bucket student-lambda-backups-saifur](<s3 srn-shot/s3 srn-shot/s3-bucket.png>)
 
-- Import role: use [iam_policies/lambda-import-putitem-policy.json](iam_policies/lambda-import-putitem-policy.json). Replace `REGION` and `ACCOUNT_ID`.
-- Export role: use [iam_policies/lambda-backup-export-policy.json](iam_policies/lambda-backup-export-policy.json). Replace `REGION`, `ACCOUNT_ID`, and `YOUR_UNIQUE_BUCKET_NAME`.
+### Step 4: Gave each function its own IAM role
 
-Use `us-east-1` for `REGION`. The Scheduler will use a separate role to invoke the export function.
+Each Lambda function has its own execution role. Both roles have the AWS-managed `AWSLambdaBasicExecutionRole` policy so they can write logs to CloudWatch.
 
-### 4. Create and configure the Lambda functions
+- The import role has an inline policy that allows only `dynamodb:PutItem` on the table, based on [iam_policies/lambda-import-putitem-policy.json](iam_policies/lambda-import-putitem-policy.json).
+- The export role allows `dynamodb:Scan` on the table and `s3:PutObject` on the bucket, based on [iam_policies/lambda-backup-export-policy.json](iam_policies/lambda-backup-export-policy.json).
 
-Create both functions in the Lambda Console using a supported Python runtime and their corresponding execution roles. Upload the ZIP packages from `lambda_zips/` and set the handler to `lambda_function.lambda_handler`.
+![Import function role with AllowPutDemoUsers and AWSLambdaBasicExecutionRole](<s3 srn-shot/s3 srn-shot/IAM-json.png>)
+
+### Step 5: Created the Lambda functions
+
+I created both functions with a Python runtime, uploaded the ZIP files and set the handler to `lambda_function.lambda_handler`.
 
 | Function | ZIP package | Environment variables |
 | --- | --- | --- |
 | `import-jsonplaceholder-users` | `lambda-import-users.zip` | `TABLE_NAME=jsonplaceholder-users` |
-| `export-dynamodb-to-s3` | `lambda-backup-to-s3.zip` | `TABLE_NAME=jsonplaceholder-users`, `BUCKET_NAME=YOUR_BUCKET`, `BACKUP_PREFIX=backups` (optional) |
+| `export-dynamodb-to-s3` | `lambda-backup-to-s3.zip` | `TABLE_NAME=jsonplaceholder-users`, `BUCKET_NAME=student-lambda-backups-saifur`, `BACKUP_PREFIX=backups` |
 
-### 5. Run the import function
+![import-jsonplaceholder-users Lambda function](<s3 srn-shot/s3 srn-shot/lamda-fucntion-1.png>)
 
-In `import-jsonplaceholder-users`, create a test event with `{}` and choose **Test**. A successful response reports the number of users saved. Check the DynamoDB table to see the imported items. Running the import again replaces items with the same `id`; it does not create duplicates.
+### Step 6: Ran the import function
 
-![Successful Lambda import test](<ScreenShots/Screenshot #1 [DynamicDB].png>)
+I tested `import-jsonplaceholder-users` with an empty event `{}`. It returned status 200 and `saved_count: 10`, so all 10 users were saved in DynamoDB. Running it again does not create duplicates, because `PutItem` replaces items that have the same `id`.
 
-### 6. Run the export function
+![Import test succeeded with saved_count 10](<s3 srn-shot/s3 srn-shot/import-json-10 -items.png>)
 
-In `export-dynamodb-to-s3`, create a test event with `{}` and choose **Test**. A successful response includes the S3 URI. Open your bucket and look under `backups/YYYY-MM-DD/` to find the exported JSON file.
+### Step 7: Ran the export function by hand once
 
-![Successful Lambda export test](<ScreenShots/Screenshot # 5.png>)
+Before setting up the schedule, I tested `export-dynamodb-to-s3` manually with `{}`. It returned status 200, `exported_count: 10` and the S3 path of the new file.
 
-![Exported JSON backups in the S3 bucket](<ScreenShots/Screenshot # 8.png>)
+![Export test succeeded with exported_count 10](<s3 srn-shot/s3 srn-shot/export-user-sucss-resilt.png>)
 
-If a test fails, open the function's CloudWatch log group and check the error. The import role needs `dynamodb:PutItem`; the export role needs `dynamodb:Scan` and `s3:PutObject`.
+At this point the `backups/2026-11-10/` folder had just one file, created by this manual test at 22:24:40 (UTC+6).
 
-### 7. Schedule automatic exports
+![One backup file in S3 after the manual test](<s3 srn-shot/s3 srn-shot/s3-backup-update.png>)
 
-In EventBridge Scheduler, create a schedule named `dynamodb-backup-every-2min`:
+### Step 8: Created the schedule
 
-1. Choose a recurring schedule with the expression `rate(2 minutes)` and turn off the flexible time window.
-2. Set `export-dynamodb-to-s3` as the target.
-3. Choose or create a Scheduler execution role that allows EventBridge Scheduler to invoke this Lambda function.
-4. Create the schedule and confirm it is **Enabled**.
+In EventBridge Scheduler I created `dynamodb-backup-every-2min`:
 
-![Example EventBridge Scheduler configuration](<ScreenShots/Screenshot # 7.png>)
+- Recurring schedule: `rate(2 minutes)`
+- Flexible time window: off
+- Target: `export-dynamodb-to-s3` (Lambda Invoke)
+- Execution role: a Scheduler role that is allowed to invoke this Lambda function
 
-The screenshot is an example of a previous configuration; the schedule was later deleted. Create a new schedule in your account to run this project. Wait for scheduled runs and check CloudWatch and S3 rather than manually testing the function when verifying automation.
+The schedule was created and **Enabled** on Nov 10, 2026 at 22:36:34 (UTC+6).
 
-### 8. MISSING: Capture proof of an automatic scheduled backup
+![Schedule dynamodb-backup-every-2min created with rate(2 minutes)](<s3 srn-shot/s3 srn-shot/even-bridge-created.png>)
 
-**This part of the assignment is not finished yet.** The screenshots below are old examples. They show that a backup worked when the Lambda was tested, but they do not prove that the schedule ran it automatically.
+![Schedule list showing dynamodb-backup-every-2min Enabled with target export-dynamodb-to-s3](<s3 srn-shot/s3 srn-shot/event-bridge-enabled.png>)
 
-#### Old examples: where to look
+### Step 9: Proved the schedule runs the backup automatically
 
-**Schedule settings:** The schedule should say **Enabled** and show `rate(2 minutes)` and the `export-dynamodb-to-s3` function. This old screenshot is only an example:
+After enabling the schedule I did **not** press Test. I waited and checked S3. New backup files appeared on their own, about every 2 minutes:
 
-![Old example of the EventBridge Scheduler details](<ScreenShots/Screenshot # 7.png>)
+| File time (UTC+6) | Gap |
+| --- | --- |
+| 22:37:18 | first run after the schedule was enabled |
+| 22:38:53 | ~2 min |
+| 22:40:53 | 2 min |
+| 22:42:53 | 2 min |
+| 22:44:53 | 2 min |
+| 22:46:53 | 2 min |
+| 22:48:53 | 2 min |
 
-**Lambda log:** A successful run has a message beginning `SUCCESS: Exported ... users to s3://...`. This old screenshot shows a successful export, but not what started it:
+The steady 2-minute gap shows that EventBridge Scheduler was starting the Lambda function, not me.
 
-![Old example of a successful export log](<ScreenShots/Screenshot # 5 log.png>)
+![S3 backups created every 2 minutes by the schedule](<s3 srn-shot/s3 srn-shot/backup-with-2mins.png>)
 
-**S3 backup files:** New JSON files should appear in the bucket. This old screenshot is not linked to a confirmed scheduled run:
+Later the folder had 51 backup files.
 
-![Old example of JSON objects in the S3 backup folder](<ScreenShots/Screenshot # 8.png>)
+![S3 backup folder with 51 objects](<s3 srn-shot/s3 srn-shot/log-s3-backup.png>)
 
-#### What to do for the assignment
+### Step 10: Checked the CloudWatch logs
 
-1. In EventBridge Scheduler, create or enable the schedule. Make sure it is **Enabled**, runs every two minutes, and targets `export-dynamodb-to-s3`.
-2. Take a screenshot of these schedule settings.
-3. Wait at least four minutes. **Do not press Test or run the Lambda yourself.** Let the schedule start it.
-4. Take a screenshot of the Lambda's CloudWatch logs showing a successful export after you enabled the schedule.
-5. Take a screenshot of the S3 bucket showing the new JSON backup file or files.
-6. Add the new screenshots to `ScreenShots/` and link them here. The times on the schedule, log, and S3 screenshots should be from the same period.
+The log group `/aws/lambda/export-dynamodb-to-s3` shows each run. A successful run reads the table, reads 10 items in 1 scan page, and prints `SUCCESS: Exported 10 users to s3://student-lambda-backups-saifur/backups/...`. The file name in the log matches a file in the S3 folder (`users-19-39-14-284716-...json`).
 
-You need these three screenshots: **enabled schedule**, **successful Lambda log**, and **new S3 backup file(s)**. Together, they show that the schedule ran the backup. A Lambda test screenshot by itself only shows a manual run. If available, also include a screenshot of the Scheduler's run count for the same period.
+![CloudWatch log showing SUCCESS: Exported 10 users to S3](<s3 srn-shot/s3 srn-shot/evenbrige-log.png>)
 
-**Example:** The schedule is enabled at 10:00. You do not press Test. At about 10:02, the Lambda log shows that it saved a file, and S3 shows that file with a matching time. Take screenshots of all three.
+## Answers to the report questions
 
-### 9. Clean up
+My answers are in [QuestionsToAnswerInYourReport.md](QuestionsToAnswerInYourReport.md).
 
-Disable or delete the schedule when finished to prevent further invocations and charges. Delete test resources from your AWS account if you no longer need them.
+## Clean up
+
+When I finish, I will disable or delete the `dynamodb-backup-every-2min` schedule so it stops running and creating new files. I can then delete the Lambda functions, the DynamoDB table, the S3 bucket and the IAM roles if I no longer need them.
